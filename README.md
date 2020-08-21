@@ -25,4 +25,4 @@ Simply run the following command with the correct path to the generator:
 ```nbinput=3 && CUDA_VISIBLE_DEVICES=1 python test.py --warp_skip mask --dataset market --nb_inputs $nbinput  --dmax 6 --kernel_size_last=1 --fusion_type att_dec_rec --return_att 1 -generator_checkpoint path/to/generator/checkpoint```
 
 ### For help
-This repo is based on the [Deformable GAN repo](https://github.com/AliaksandrSiarohin/pose-gan). You may find some help in this repo. If you don't, you can contact me on my telecom-paris.fr address (check my website). 
+This repo is based on the [Deformable GAN repo](https://github.com/AliaksandrSiarohin/pose-gan). You may find some help in this repo. If you don't, you can contact me on my telecom-paris.fr address (check my [website](stelat.eu)). 
