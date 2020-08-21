@@ -1,0 +1,213 @@
+import os
+
+from conditional_gan import make_generator
+import cmd
+from pose_dataset import PoseHMDataset
+
+from gan.inception_score import get_inception_score
+
+from skimage.io import imread, imsave
+from skimage.measure import compare_ssim
+
+import numpy as np
+import pandas as pd
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
+from tqdm import tqdm
+import re
+np.set_printoptions(precision=2)
+def l1_score(generated_images, reference_images):
+    score_list = []
+    for reference_image, generated_image in zip(reference_images, generated_images):
+        score = np.abs(2 * (reference_image/255.0 - 0.5) - 2 * (generated_image/255.0 - 0.5)).mean()
+        score_list.append(score)
+    return np.mean(score_list)
+
+
+def ssim_score(generated_images, reference_images):
+    ssim_score_list = []
+    for reference_image, generated_image in zip(reference_images, generated_images):
+        ssim = compare_ssim(reference_image, generated_image, gaussian_weights=True, sigma=1.5,
+                            use_sample_covariance=False, multichannel=True,
+                            data_range=generated_image.max() - generated_image.min())
+        ssim_score_list.append(ssim)
+    return np.mean(ssim_score_list)
+
+
+def save_images(input_images, att_images,target_images, generated_images, names, output_folder):
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+    if len(att_images)>0:
+        iterList=zip(map(list, zip(*input_images)),map(list, zip(*att_images)), target_images, generated_images, names)
+    else:
+        iterList=zip(map(list, zip(*input_images)), target_images, generated_images, names)
+
+    for images in iterList:
+        # input_name = "input_"+str('_'.join(images[-1])) + '.png'
+        # att_name = "att_"+str('_'.join(images[-1])) + '.png'
+        # GT_name = "GT_"+str('_'.join(images[-1])) + '.png'
+        # res_name = str('_'.join(images[-1])) + '.png'
+        res_name = str(images[-1][0])[:-4]+ '.png'
+        input_name = "input_"+res_name
+        att_name = "att_"+res_name
+        GT_name = "GT_"+res_name
+
+
+        
+        
+        # if len(att_images)>0:
+        #     imagesList=images[0]+images[1]+list(images[1+1:])
+        # else:
+        inputimages=images[0]
+        imsave(os.path.join(output_folder, input_name), np.concatenate(inputimages, axis=1))
+
+        attimages=images[1]
+        imsave(os.path.join(output_folder, att_name), np.concatenate(attimages, axis=1))
+
+        GTimages=images[-3]
+        imsave(os.path.join(output_folder, GT_name),GTimages)
+
+        resimages=images[-2]
+        imsave(os.path.join(output_folder, res_name),resimages)
+
+
+def create_masked_image(names, images, annotation_file):
+    import pose_utils
+    masked_images = []
+    df = pd.read_csv(annotation_file, sep=':')
+    for name, image in zip(names, images):
+        to = name[1]
+        ano_to = df[df['name'] == to].iloc[0]
+
+        kp_to = pose_utils.load_pose_cords_from_strings(ano_to['keypoints_y'], ano_to['keypoints_x'])
+
+        mask = pose_utils.produce_ma_mask(kp_to, image.shape[:2])
+        masked_images.append(image * mask[..., np.newaxis])
+
+    return masked_images
+
+
+def load_generated_images(images_folder):
+    input_images = []
+    target_images = []
+    generated_images = []
+    names = []
+    for img_name in os.listdir(images_folder):
+        img = imread(os.path.join(images_folder, img_name))
+        h = img.shape[1] / 3
+        input_images.append(img[:, :h])
+        target_images.append(img[:, h:2*h])
+        generated_images.append(img[:, 2*h:])
+
+        m = re.match(r'([A-Za-z0-9_]*.jpg)_([A-Za-z0-9_]*.jpg)', img_name)
+        fr = m.groups()[0]
+        to = m.groups()[1]
+        names.append([fr, to])
+
+    return input_images, target_images, generated_images, names
+
+
+
+def analyze_images(dataset, generator,  use_input_pose,crop, nb_inputs=2,nbAtt=0):
+    input_images = [[] for i in range(nb_inputs)]
+    input_poses = [[] for i in range(nb_inputs)]
+    meanAtt = [[] for i in range(nb_inputs)]
+    meanPose = [[] for i in range(nb_inputs)]
+    target_images = []
+    generated_images = []
+    names = []
+    
+
+    def deprocess_image(img,crop):
+        if crop:
+            if len(img.shape)==4:
+                img=img[:,:,41:-41,:]
+            elif len(img.shape)==2:
+                img=img[:,41:-41]
+
+
+        return (255 * ((img + 1) / 2.0)).astype(np.uint8)
+    
+    colormap=[tuple([int(255*x) for x in plt.get_cmap('jet')(i)[:-1]]) for i in range(255)]
+
+    
+    def colorizeGray(img,colmap):
+
+        
+        output=np.empty(img.shape[0:2]+(3,),dtype=np.uint8)
+        for i in range(output.shape[0]):
+            for j in range(output.shape[1]):
+                output[i,j,:]=colmap[int(img[i,j])]
+        return output
+
+    same=0
+    diff=0
+    for _ in tqdm(range(dataset._file_test.shape[0])):
+        batch, name = dataset.next_generator_sample_test(with_names=True)
+        out = generator.predict(batch)
+        out_index = 2*nb_inputs if use_input_pose else nb_inputs
+
+        target_pose=out[out_index+1]
+
+        
+
+        input_poses=[batch[nb_inputs+i] for i in range(nb_inputs)]
+            
+        meanAtt=[np.mean(np.squeeze(out[2+out_index+i])) for i in range(nb_inputs)]
+        distanceTargetPose=[np.mean(np.sqrt((target_pose-p)**2)) for p in input_poses]
+        print (distanceTargetPose, meanAtt)
+        if np.argmin(distanceTargetPose)==np.argmax(meanAtt):
+            same+=1
+        else:
+            diff+=1
+            
+        # out_index = 2 if use_input_pose else 1
+        out_index = 2*nb_inputs if use_input_pose else nb_inputs
+        
+        target_images.append(deprocess_image(batch[out_index],crop))
+        generated_images.append(deprocess_image(out[out_index],crop))
+
+        names.append([name.iloc[0]['from_0'],name.iloc[0]['from_1'], name.iloc[0]['to']])
+
+
+    print "STAT: " + str(same/float(same+diff))
+    print "STAT: " + str((same,diff))
+
+    return same,diff
+
+
+def test():
+    args = cmd.args()
+    if 'market' in args.file_test:
+        args.file_test = 'data/market-export-test.csv'
+        # args.file_test = 'data/market-12_uplets-test.csv'
+    else:
+        args.file_test = 'data/fasion-6-test.csv'
+        
+    if args.load_generated_images:
+        print ("Loading images...")
+        input_images, target_images, generated_images, names,att_images = load_generated_images(args.generated_images_dir)
+    else:
+        print ("Generate images...")
+        from keras import backend as K
+        if args.use_dropout_test:
+            K.set_learning_phase(1)
+        dataset = PoseHMDataset(test_phase=True, **vars(args))
+        
+        generator = make_generator(args.image_size, args.nb_inputs, args.use_input_pose, args.warp_skip, args.disc_type, args.warp_agg,
+                                   args.use_bg, args.pose_rep_type,args.fusion_type,args.return_att,args.nb_rec,args.dmax,args.kernel_size_last,args.res_att,args.use3D)
+
+        assert (args.generator_checkpoint is not None)
+        generator.load_weights(args.generator_checkpoint)
+        crop=True if "fasion" in args.file_test else False
+        same,diff= analyze_images(dataset, generator, args.use_input_pose,crop,nb_inputs=args.nb_inputs,nbAtt=(args.nb_inputs if args.return_att else 0))
+
+
+
+
+if __name__ == "__main__":
+    test()
+
+
