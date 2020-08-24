@@ -13,7 +13,7 @@ Then you need to create the training and test tuples:
 
 ```nbinput=12 && python create_n_tuples_dataset.py --nb_inputs nbinput```
 
-Note that, with this command we generate tuples as if we were considering 12 input images. In this step, we recommend to keep ```nbinput=12```, since, in the training step, only the first images of the 12-tuples will be considered if you specify fewer inputs. 
+Note that, with this command we generate tuples as if we were considering 12 input images. In this step, we recommend to keep ```nbinput=12``` for the market dataset (and 6 for fashion), since, in the training step, only the first images of the 12-tuples will be considered if you specify fewer inputs. If you change this parameter, you will need to modify the annotation file name in cmd.py accordingly.
 
 Then you can train your model with the following command:
 
